@@ -1,4 +1,4 @@
-# Read a selected post sitemap article, then save it only if DynamoDB has no record.
+# Save the first unsaved article from a selected post sitemap.
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -21,7 +21,7 @@ def read_xml(url):
 
 
 def lambda_handler(event, context):
-    # Select one post sitemap and article by their zero-based positions.
+    # Select one post sitemap by its zero-based position.
     index = read_xml(SITEMAP_INDEX)
     post_sitemaps = []
     for loc in index.findall(".//{*}sitemap/{*}loc"):
@@ -30,18 +30,21 @@ def lambda_handler(event, context):
             post_sitemaps.append(loc.text.strip())
 
     post_sitemap_index = event.get("post_sitemap_index", 0)
-    article_index = event.get("article_index", 0)
-    article = read_xml(post_sitemaps[post_sitemap_index]).findall("{*}url")[article_index]
-    article_url = article.findtext("{*}loc").strip()
+    articles = read_xml(post_sitemaps[post_sitemap_index]).findall("{*}url")
+
+    # Find the first article without a DynamoDB record.
+    table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
+    for article in articles:
+        article_url = article.findtext("{*}loc").strip()
+        article_key = article_url.rstrip("/")
+        if not table.get_item(Key={"article_url": article_key}, ConsistentRead=True).get("Item"):
+            break
+    else:
+        return {"statusCode": 200, "body": "No new articles in the selected post sitemap"}
+
     sitemap_lastmod = article.findtext("{*}lastmod")
-    article_key = article_url.rstrip("/")
     parsed_url = urlparse(article_url)
     s3_key = f"{parsed_url.hostname}{parsed_url.path.rstrip('/')}.html"
-
-    # Check the full article URL before making another download.
-    table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
-    if table.get_item(Key={"article_url": article_key}, ConsistentRead=True).get("Item"):
-        return {"statusCode": 200, "body": f"Skipped previously saved article: {article_key}"}
 
     # Fetch the HTML and save its original bytes to S3.
     request = urllib.request.Request(article_url, headers={"User-Agent": "news-analytics-scraper/0.1"})
