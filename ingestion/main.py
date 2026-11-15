@@ -3,7 +3,7 @@ import re
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import boto3
@@ -33,6 +33,9 @@ def lambda_handler(event, context):
     post_sitemap_index = event.get("post_sitemap_index")
     selected_sitemaps = post_sitemaps if post_sitemap_index is None else [post_sitemaps[post_sitemap_index]]
     max_articles = event.get("max_articles", 1)
+    # Limit scheduled runs to recently modified sitemap entries; omit this for backfills.
+    max_age_days = event.get("max_age_days")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days) if max_age_days is not None else None
 
     # Check each article and save up to the requested number of new ones.
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
@@ -41,6 +44,15 @@ def lambda_handler(event, context):
     for sitemap_url in selected_sitemaps:
         print(f"Checking sitemap: {sitemap_url}")
         for article in read_xml(sitemap_url).findall("{*}url"):
+            # Keep entries without lastmod; skip older entries before looking them up in DynamoDB.
+            lastmod = article.findtext("{*}lastmod")
+            if cutoff is not None and lastmod:
+                modified_at = datetime.fromisoformat(lastmod.replace("Z", "+00:00"))
+                if modified_at.tzinfo is None:
+                    modified_at = modified_at.replace(tzinfo=timezone.utc)
+                if modified_at < cutoff:
+                    continue
+
             article_url = article.findtext("{*}loc").strip()
             article_key = article_url.rstrip("/")
             if table.get_item(Key={"article_url": article_key}, ConsistentRead=True).get("Item"):
@@ -69,7 +81,7 @@ def lambda_handler(event, context):
                 "original_url": article_url,
                 "publisher_domain": parsed_url.hostname,
                 "first_downloaded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "sitemap_lastmod": article.findtext("{*}lastmod"),
+                "sitemap_lastmod": lastmod,
                 "s3_key": s3_key,
             }
             table.put_item(Item=item, ConditionExpression="attribute_not_exists(article_url)")
