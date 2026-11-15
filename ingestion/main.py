@@ -51,13 +51,24 @@ def lambda_handler(event, context):
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
     saved_urls = []
     failed_urls = []
+    stopped_early = False
     for sitemap_url, sitemap_lastmod in selected_sitemaps:
         # Skip old sitemap files before making another HTTP request.
         if is_older_than(sitemap_lastmod, cutoff):
             print(f"Skipping old sitemap: {sitemap_url}")
             continue
+        # Leave time to finish the current invocation before Lambda's timeout.
+        if context.get_remaining_time_in_millis() < 45_000:
+            stopped_early = True
+            print(f"Stopping with {context.get_remaining_time_in_millis()} ms remaining")
+            break
         print(f"Checking sitemap: {sitemap_url}")
         for article in read_xml(sitemap_url).findall("{*}url"):
+            # Stop before starting another article when little time remains.
+            if context.get_remaining_time_in_millis() < 45_000:
+                stopped_early = True
+                print(f"Stopping with {context.get_remaining_time_in_millis()} ms remaining")
+                break
             # Keep entries without lastmod; skip older entries before looking them up in DynamoDB.
             lastmod = article.findtext("{*}lastmod")
             if is_older_than(lastmod, cutoff):
@@ -99,8 +110,14 @@ def lambda_handler(event, context):
             saved_urls.append(article_url)
             if len(saved_urls) >= max_articles:
                 break
-        if len(saved_urls) >= max_articles:
+        if stopped_early or len(saved_urls) >= max_articles:
             break
 
     # Return both successful and failed article URLs from this invocation.
-    return {"statusCode": 200, "saved_count": len(saved_urls), "saved_urls": saved_urls, "failed_urls": failed_urls}
+    return {
+        "statusCode": 200,
+        "saved_count": len(saved_urls),
+        "saved_urls": saved_urls,
+        "failed_urls": failed_urls,
+        "stopped_early": stopped_early,
+    }
