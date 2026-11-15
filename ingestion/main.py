@@ -68,7 +68,7 @@ def lambda_handler(event, context):
 
     post_sitemap_index = event.get("post_sitemap_index")
     selected_sitemaps = post_sitemaps if post_sitemap_index is None else [post_sitemaps[post_sitemap_index]]
-    max_articles = event.get("max_articles", 1)
+    max_articles = event.get("max_articles")
 
     # Check each article and save up to the requested number of new ones.
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
@@ -76,6 +76,7 @@ def lambda_handler(event, context):
     saved_urls = []
     failed_urls = []
     stopped_early = False
+    limit_reached = False
     for sitemap_url, sitemap_lastmod in selected_sitemaps:
         # Skip old sitemap files before making another HTTP request.
         if is_older_than(sitemap_lastmod, cutoff):
@@ -144,18 +145,20 @@ def lambda_handler(event, context):
                 print(f"Recorded in DynamoDB: {article_key}")
                 saved_keys.add(article_key)
                 saved_urls.append(article_url)
-                if len(saved_urls) >= max_articles:
+                if max_articles is not None and len(saved_urls) >= max_articles:
+                    limit_reached = True
                     break
-            if stopped_early or len(saved_urls) >= max_articles:
+            if stopped_early or limit_reached:
                 break
-        if stopped_early or len(saved_urls) >= max_articles:
+        if stopped_early or limit_reached:
             break
 
-    # Return both successful and failed article URLs from this invocation.
+    # Report saved articles, failures, and whether every selected sitemap was examined.
     return {
         "statusCode": 200,
         "saved_count": len(saved_urls),
         "saved_urls": saved_urls,
         "failed_urls": failed_urls,
         "stopped_early": stopped_early,
+        "scan_finished": not stopped_early and not limit_reached,
     }
