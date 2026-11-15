@@ -1,4 +1,5 @@
-# Save a bounded number of unsaved articles from matching post sitemaps.
+# Save unsaved articles from matching post sitemaps until the scan or time budget ends.
+import json
 import re
 import time
 import urllib.error
@@ -153,12 +154,13 @@ def lambda_handler(event, context):
         if stopped_early or limit_reached:
             break
 
-    # Report saved articles, failures, and whether every selected sitemap was examined.
-    return {
-        "statusCode": 200,
+    # Return detailed results and log a compact summary for scheduled runs.
+    result = {
         "saved_count": len(saved_urls),
         "saved_urls": saved_urls,
         "failed_urls": failed_urls,
         "stopped_early": stopped_early,
         "scan_finished": not stopped_early and not limit_reached,
     }
+    print(json.dumps({key: result[key] for key in ("saved_count", "failed_urls", "stopped_early", "scan_finished")}))
+    return result
