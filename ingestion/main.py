@@ -21,37 +21,47 @@ def read_xml(url):
         return ET.fromstring(response.read())
 
 
+# Check whether a sitemap timestamp falls outside the requested age window.
+def is_older_than(lastmod, cutoff):
+    if cutoff is None or not lastmod:
+        return False
+    modified_at = datetime.fromisoformat(lastmod.replace("Z", "+00:00"))
+    if modified_at.tzinfo is None:
+        modified_at = modified_at.replace(tzinfo=timezone.utc)
+    return modified_at < cutoff
+
+
 def lambda_handler(event, context):
     # Find post sitemaps and apply an optional zero-based test selection.
+    max_age_days = event.get("max_age_days")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days) if max_age_days is not None else None
     index = read_xml(SITEMAP_INDEX)
     post_sitemaps = []
-    for loc in index.findall(".//{*}sitemap/{*}loc"):
-        filename = urlparse(loc.text).path.rsplit("/", 1)[-1]
+    for sitemap in index.findall(".//{*}sitemap"):
+        sitemap_url = sitemap.findtext("{*}loc").strip()
+        filename = urlparse(sitemap_url).path.rsplit("/", 1)[-1]
         if re.fullmatch(r"post-sitemap(?:\d+)?\.xml", filename):
-            post_sitemaps.append(loc.text.strip())
+            post_sitemaps.append((sitemap_url, sitemap.findtext("{*}lastmod")))
 
     post_sitemap_index = event.get("post_sitemap_index")
     selected_sitemaps = post_sitemaps if post_sitemap_index is None else [post_sitemaps[post_sitemap_index]]
     max_articles = event.get("max_articles", 1)
-    # Limit scheduled runs to recently modified sitemap entries; omit this for backfills.
-    max_age_days = event.get("max_age_days")
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days) if max_age_days is not None else None
 
     # Check each article and save up to the requested number of new ones.
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
     saved_urls = []
     failed_urls = []
-    for sitemap_url in selected_sitemaps:
+    for sitemap_url, sitemap_lastmod in selected_sitemaps:
+        # Skip old sitemap files before making another HTTP request.
+        if is_older_than(sitemap_lastmod, cutoff):
+            print(f"Skipping old sitemap: {sitemap_url}")
+            continue
         print(f"Checking sitemap: {sitemap_url}")
         for article in read_xml(sitemap_url).findall("{*}url"):
             # Keep entries without lastmod; skip older entries before looking them up in DynamoDB.
             lastmod = article.findtext("{*}lastmod")
-            if cutoff is not None and lastmod:
-                modified_at = datetime.fromisoformat(lastmod.replace("Z", "+00:00"))
-                if modified_at.tzinfo is None:
-                    modified_at = modified_at.replace(tzinfo=timezone.utc)
-                if modified_at < cutoff:
-                    continue
+            if is_older_than(lastmod, cutoff):
+                continue
 
             article_url = article.findtext("{*}loc").strip()
             article_key = article_url.rstrip("/")
