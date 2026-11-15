@@ -1,5 +1,6 @@
 # Save a bounded number of unsaved articles from matching post sitemaps.
 import re
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ def lambda_handler(event, context):
     # Check each article and save up to the requested number of new ones.
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
     saved_urls = []
+    failed_urls = []
     for sitemap_url in selected_sitemaps:
         print(f"Checking sitemap: {sitemap_url}")
         for article in read_xml(sitemap_url).findall("{*}url"):
@@ -47,9 +49,14 @@ def lambda_handler(event, context):
             # Fetch the new article and save its original HTML bytes to S3.
             print(f"Selected article: {article_url}")
             request = urllib.request.Request(article_url, headers={"User-Agent": "news-analytics-scraper/0.1"})
-            with urllib.request.urlopen(request, timeout=20) as response:
-                html = response.read()
-                content_type = response.headers.get("Content-Type", "text/html")
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    html = response.read()
+                    content_type = response.headers.get("Content-Type", "text/html")
+            except urllib.error.URLError as error:
+                print(f"Download failed: {article_url}: {error}")
+                failed_urls.append(article_url)
+                continue
 
             parsed_url = urlparse(article_url)
             s3_key = f"{parsed_url.hostname}{parsed_url.path.rstrip('/')}.html"
@@ -73,5 +80,5 @@ def lambda_handler(event, context):
         if len(saved_urls) >= max_articles:
             break
 
-    # Return the articles saved during this invocation.
-    return {"statusCode": 200, "saved_count": len(saved_urls), "saved_urls": saved_urls}
+    # Return both successful and failed article URLs from this invocation.
+    return {"statusCode": 200, "saved_count": len(saved_urls), "saved_urls": saved_urls, "failed_urls": failed_urls}
