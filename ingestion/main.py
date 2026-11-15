@@ -1,4 +1,4 @@
-# Save the first unsaved article from a selected post sitemap.
+# Save the first unsaved article across post sitemaps or one selected sitemap.
 import re
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -21,7 +21,7 @@ def read_xml(url):
 
 
 def lambda_handler(event, context):
-    # Select one post sitemap by its zero-based position.
+    # Find post sitemaps and apply an optional zero-based test selection.
     index = read_xml(SITEMAP_INDEX)
     post_sitemaps = []
     for loc in index.findall(".//{*}sitemap/{*}loc"):
@@ -29,18 +29,23 @@ def lambda_handler(event, context):
         if re.fullmatch(r"post-sitemap(?:\d+)?\.xml", filename):
             post_sitemaps.append(loc.text.strip())
 
-    post_sitemap_index = event.get("post_sitemap_index", 0)
-    articles = read_xml(post_sitemaps[post_sitemap_index]).findall("{*}url")
+    post_sitemap_index = event.get("post_sitemap_index")
+    selected_sitemaps = post_sitemaps if post_sitemap_index is None else [post_sitemaps[post_sitemap_index]]
 
-    # Find the first article without a DynamoDB record.
+    # Find the first article without a DynamoDB record across the selected sitemaps.
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
-    for article in articles:
-        article_url = article.findtext("{*}loc").strip()
-        article_key = article_url.rstrip("/")
-        if not table.get_item(Key={"article_url": article_key}, ConsistentRead=True).get("Item"):
+    article = None
+    for sitemap_url in selected_sitemaps:
+        for candidate in read_xml(sitemap_url).findall("{*}url"):
+            article_url = candidate.findtext("{*}loc").strip()
+            article_key = article_url.rstrip("/")
+            if not table.get_item(Key={"article_url": article_key}, ConsistentRead=True).get("Item"):
+                article = candidate
+                break
+        if article is not None:
             break
-    else:
-        return {"statusCode": 200, "body": "No new articles in the selected post sitemap"}
+    if article is None:
+        return {"statusCode": 200, "body": "No new articles in the checked post sitemaps"}
 
     sitemap_lastmod = article.findtext("{*}lastmod")
     parsed_url = urlparse(article_url)
