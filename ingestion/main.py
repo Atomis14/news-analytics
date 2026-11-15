@@ -21,7 +21,7 @@ def read_xml(url):
 
 
 def lambda_handler(event, context):
-    # Select one article by its zero-based position in the first post sitemap.
+    # Select one post sitemap and article by their zero-based positions.
     index = read_xml(SITEMAP_INDEX)
     post_sitemaps = []
     for loc in index.findall(".//{*}sitemap/{*}loc"):
@@ -29,8 +29,9 @@ def lambda_handler(event, context):
         if re.fullmatch(r"post-sitemap(?:\d+)?\.xml", filename):
             post_sitemaps.append(loc.text.strip())
 
+    post_sitemap_index = event.get("post_sitemap_index", 0)
     article_index = event.get("article_index", 0)
-    article = read_xml(post_sitemaps[0]).findall("{*}url")[article_index]
+    article = read_xml(post_sitemaps[post_sitemap_index]).findall("{*}url")[article_index]
     article_url = article.findtext("{*}loc").strip()
     sitemap_lastmod = article.findtext("{*}lastmod")
     article_key = article_url.rstrip("/")
