@@ -36,6 +36,7 @@ def lambda_handler(event, context):
     table = boto3.resource("dynamodb", region_name="eu-north-1").Table(TABLE)
     article = None
     for sitemap_url in selected_sitemaps:
+        print(f"Checking sitemap: {sitemap_url}")
         for candidate in read_xml(sitemap_url).findall("{*}url"):
             article_url = candidate.findtext("{*}loc").strip()
             article_key = article_url.rstrip("/")
@@ -45,8 +46,10 @@ def lambda_handler(event, context):
         if article is not None:
             break
     if article is None:
+        print("No new articles found")
         return {"statusCode": 200, "body": "No new articles in the checked post sitemaps"}
 
+    print(f"Selected article: {article_url}")
     sitemap_lastmod = article.findtext("{*}lastmod")
     parsed_url = urlparse(article_url)
     s3_key = f"{parsed_url.hostname}{parsed_url.path.rstrip('/')}.html"
@@ -58,6 +61,7 @@ def lambda_handler(event, context):
         content_type = response.headers.get("Content-Type", "text/html")
 
     boto3.client("s3").put_object(Bucket=BUCKET, Key=s3_key, Body=html, ContentType=content_type)
+    print(f"Uploaded to S3: s3://{BUCKET}/{s3_key}")
 
     # Record success after S3 confirms the upload.
     item = {
@@ -69,4 +73,5 @@ def lambda_handler(event, context):
         "s3_key": s3_key,
     }
     table.put_item(Item=item, ConditionExpression="attribute_not_exists(article_url)")
+    print(f"Recorded in DynamoDB: {article_key}")
     return {"statusCode": 200, "body": f"Saved {len(html)} bytes to s3://{BUCKET}/{s3_key}"}
