@@ -6,11 +6,18 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 
-# Parse the visible article elements and the publisher's JSON-LD metadata.
-def parse_article(html: str) -> dict[str, object]:
+# Parse publisher articles, returning None for other page types.
+def parse_article(html: str) -> dict[str, object] | None:
     soup = BeautifulSoup(html, "html.parser")
 
     print(soup.select_one("title").string)
+
+    # Identify article pages from their JSON-LD before reading body markup.
+    schema = json.loads(soup.select_one('script.yoast-schema-graph').string)
+    graph = schema["@graph"]
+    article_data = next((item for item in graph if item.get("@type") == "Article"), None)
+    if article_data is None:
+        return None
 
     heading = soup.select_one("h1.jeg_post_title")
     content = soup.select_one(".jeg_custom_content_wrapper .entry-content .content-inner")
@@ -31,9 +38,6 @@ def parse_article(html: str) -> dict[str, object]:
                 links.append({"text": link.get_text(" ", strip=True), "url": link["href"]})
 
     # Resolve article author references to their publisher profile records.
-    schema = json.loads(soup.select_one('script.yoast-schema-graph').string)
-    graph = schema["@graph"]
-    article_data = next(item for item in graph if item.get("@type") == "Article")
     people = {item["@id"]: item for item in graph if item.get("@type") == "Person"}
 
     # Treat one author reference and a list of references the same way.
@@ -69,6 +73,9 @@ if __name__ == "__main__":
         article = parse_article(sample.read_text(encoding="utf-8"))
         print("\n" + "=" * 80)
         print("FILE:", sample.name)
+        if article is None:
+            print("SKIPPED: No Article JSON-LD record")
+            continue
         print("HEADLINE:", article["headline"])
         print("URL:", article["canonical_url"])
         print("PUBLISHED:", article["published_at"])
