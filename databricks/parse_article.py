@@ -14,8 +14,9 @@ def parse_article(html: str) -> dict[str, object]:
     if heading is None or content is None:
         raise ValueError("Article headline or body was not found")
 
-    # Make raw text from the article body.
+    # Collect text and links from the article body elements.
     paragraphs = []
+    links = []
     for child in content.children:
         if child.name == "div" and "kontr-entity-placement" in child.get("class", []):
             continue
@@ -23,6 +24,8 @@ def parse_article(html: str) -> dict[str, object]:
             text = child.get_text(" ", strip=True)
             if text:
                 paragraphs.append(text)
+            for link in child.find_all("a", href=True):
+                links.append({"text": link.get_text(" ", strip=True), "url": link["href"]})
 
     # Resolve article author references to their publisher profile records.
     schema = json.loads(soup.select_one('script.yoast-schema-graph').string)
@@ -52,6 +55,7 @@ def parse_article(html: str) -> dict[str, object]:
         "authors": authors,
         "tags": tags,
         "categories": categories,
+        "links": links,
     }
 
 
@@ -70,4 +74,7 @@ if __name__ == "__main__":
             print("AUTHOR:", author["name"], author["profile_url"])
         print("TAGS:", article["tags"])
         print("CATEGORIES:", article["categories"])
+        print("LINKS:")
+        for link in article["links"]:
+            print(" -", link["text"], "=>", link["url"])
         # print("BODY:\n", article["body_text"])
