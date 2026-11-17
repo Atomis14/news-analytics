@@ -9,6 +9,9 @@ from bs4 import BeautifulSoup
 # Parse the visible article elements and the publisher's JSON-LD metadata.
 def parse_article(html: str) -> dict[str, object]:
     soup = BeautifulSoup(html, "html.parser")
+
+    print(soup.select_one("title").string)
+
     heading = soup.select_one("h1.jeg_post_title")
     content = soup.select_one(".jeg_custom_content_wrapper .entry-content .content-inner")
     if heading is None or content is None:
