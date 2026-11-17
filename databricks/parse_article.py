@@ -43,8 +43,8 @@ def parse_article(html: str) -> dict[str, object]:
     ]
 
     # Keep publisher tags and categories as separate lists.
-    tags = article_data["keywords"]
-    categories = [unescape(section) for section in article_data["articleSection"]]
+    tags = article_data.get("keywords", [])
+    categories = [unescape(section) for section in article_data.get("articleSection", [])]
 
     return {
         "headline": heading.get_text(" ", strip=True),
