@@ -51,7 +51,7 @@ def parse_article(html: str) -> dict[str, object]:
         "body_text": "\n\n".join(paragraphs),
         "canonical_url": article_data["mainEntityOfPage"]["@id"],
         "published_at": article_data["datePublished"],
-        "modified_at": article_data["dateModified"],
+        "modified_at": article_data.get("dateModified"),
         "authors": authors,
         "tags": tags,
         "categories": categories,
