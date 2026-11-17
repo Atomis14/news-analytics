@@ -10,8 +10,6 @@ from bs4 import BeautifulSoup
 def parse_article(html: str) -> dict[str, object] | None:
     soup = BeautifulSoup(html, "html.parser")
 
-    print(soup.select_one("title").string)
-
     # Identify article pages from their JSON-LD before reading body markup.
     schema = json.loads(soup.select_one('script.yoast-schema-graph').string)
     graph = schema["@graph"]
