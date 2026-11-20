@@ -22,18 +22,20 @@ def parse_article(html: str) -> dict[str, object] | None:
     if heading is None or content is None:
         raise ValueError("Article headline or body was not found")
 
-    # Collect text and links from the article body elements.
+    # Collect direct article text and text inside WPBakery blocks.
     paragraphs = []
     links = []
-    for child in content.children:
-        if child.name == "div" and "kontr-entity-placement" in child.get("class", []):
-            continue
-        if child.name in {"p", "h2", "h3", "blockquote"}:
-            text = child.get_text(" ", strip=True)
-            if text:
-                paragraphs.append(text)
-            for link in child.find_all("a", href=True):
-                links.append({"text": link.get_text(" ", strip=True), "url": link["href"]})
+    text_blocks = content.select(".wpb-content-wrapper .wpb_text_column > .wpb_wrapper")
+    for container in [content, *text_blocks]:
+        for child in container.children:
+            if child.name == "div" and "kontr-entity-placement" in child.get("class", []):
+                continue
+            if child.name in {"p", "h2", "h3", "blockquote"}:
+                text = child.get_text(" ", strip=True)
+                if text:
+                    paragraphs.append(text)
+                for link in child.find_all("a", href=True):
+                    links.append({"text": link.get_text(" ", strip=True), "url": link["href"]})
 
     # Resolve article author references to their publisher profile records.
     people = {item["@id"]: item for item in graph if item.get("@type") == "Person"}
@@ -85,4 +87,6 @@ if __name__ == "__main__":
         print("LINKS:")
         for link in article["links"]:
             print(" -", link["text"], "=>", link["url"])
-        # print("BODY:\n", article["body_text"])
+        # Show a short body preview for manual extraction checks.
+        print("BODY CHARS:", len(article["body_text"]))
+        print("BODY PREVIEW:", article["body_text"][:300])
