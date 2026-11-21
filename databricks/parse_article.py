@@ -22,20 +22,30 @@ def parse_article(html: str) -> dict[str, object] | None:
     if heading is None or content is None:
         raise ValueError("Article headline or body was not found")
 
-    # Collect direct article text and text inside WPBakery blocks.
+    # Collect article text from direct, WPBakery, headline, and page-column layouts.
     paragraphs = []
     links = []
-    text_blocks = content.select(".wpb-content-wrapper .wpb_text_column > .wpb_wrapper")
-    for container in [content, *text_blocks]:
-        for child in container.children:
-            if child.name == "div" and "kontr-entity-placement" in child.get("class", []):
-                continue
-            if child.name in {"p", "h2", "h3", "blockquote"}:
-                text = child.get_text(" ", strip=True)
-                if text:
-                    paragraphs.append(text)
-                for link in child.find_all("a", href=True):
-                    links.append({"text": link.get_text(" ", strip=True), "url": link["href"]})
+    text_blocks = content.select(
+        '.wpb-content-wrapper .wpb_text_column > .wpb_wrapper, '
+        'div[data-bind="visible: headline"], '
+        '.layoutArea > .column'
+    )
+    text_parent_ids = {id(node) for node in [content, *text_blocks]}
+    column_ids = {id(node) for node in text_blocks if "column" in node.get("class", [])}
+    for child in content.descendants:
+        parent_id = id(child.parent)
+        if parent_id not in text_parent_ids:
+            continue
+        if child.name is None and parent_id in column_ids:
+            text = " ".join(str(child).split())
+            if text:
+                paragraphs.append(text)
+        if child.name in {"p", "h2", "h3", "blockquote"}:
+            text = child.get_text(" ", strip=True)
+            if text:
+                paragraphs.append(text)
+            for link in child.find_all("a", href=True):
+                links.append({"text": link.get_text(" ", strip=True), "url": link["href"]})
 
     # Resolve article author references to their publisher profile records.
     people = {item["@id"]: item for item in graph if item.get("@type") == "Person"}
