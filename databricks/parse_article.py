@@ -22,16 +22,21 @@ def parse_article(html: str) -> dict[str, object] | None:
     if heading is None or content is None:
         raise ValueError("Article headline or body was not found")
 
-    # Collect article text from direct, WPBakery, headline, and page-column layouts.
+    # Collect article text from the known content layouts in page order.
     paragraphs = []
     links = []
     text_blocks = content.select(
         '.wpb-content-wrapper .wpb_text_column > .wpb_wrapper, '
         'div[data-bind="visible: headline"], '
-        '.layoutArea > .column'
+        '.layoutArea > .column, '
+        'div.markdown.prose'
     )
     text_parent_ids = {id(node) for node in [content, *text_blocks]}
     column_ids = {id(node) for node in text_blocks if "column" in node.get("class", [])}
+    markdown_ids = {
+        id(node) for node in text_blocks
+        if {"markdown", "prose"}.issubset(node.get("class", []))
+    }
     for child in content.descendants:
         parent_id = id(child.parent)
         if parent_id not in text_parent_ids:
@@ -40,7 +45,9 @@ def parse_article(html: str) -> dict[str, object] | None:
             text = " ".join(str(child).split())
             if text:
                 paragraphs.append(text)
-        if child.name in {"p", "h2", "h3", "blockquote"}:
+        if child.name in {"p", "h2", "h3", "blockquote"} or (
+            child.name == "h4" and parent_id in markdown_ids
+        ):
             text = child.get_text(" ", strip=True)
             if text:
                 paragraphs.append(text)
